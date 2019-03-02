@@ -29,21 +29,9 @@ To build a simple [python-sample-app](https://github.com/kubesphere/s2i-python-c
 using standalone [S2I](https://github.com/kubesphere/s2ioperator) and then run the
 resulting image with [Docker](http://docker.io) execute:
 
-*  **For RHEL7 based image**
-    ```
-    $ s2i build https://github.com/kubesphere/s2i-python-container.git --context-dir=3.5/test/setup-test-app/ rhscl/python-35-rhel7 python-sample-app
-    $ docker run -p 8080:8080 python-sample-app
-    ```
-
-*  **For RHEL8 based image**
-    ```
-    $ s2i build https://github.com/kubesphere/s2i-python-container.git --context-dir=3.5/test/setup-test-app/ rhel8/python-35 python-sample-app
-    $ docker run -p 8080:8080 python-sample-app
-    ```
-
 *  **For CentOS7 based image**
     ```
-    $ s2i build https://github.com/kubesphere/s2i-python-container.git --context-dir=3.5/test/setup-test-app/ centos/python-35-centos7 python-sample-app
+    $ s2i build https://github.com/kubesphere/s2i-python-container.git --context-dir=3.5/test/setup-test-app/ kubespheredev/python-35-centos7 python-sample-app
     $ docker run -p 8080:8080 python-sample-app
     ```
 
