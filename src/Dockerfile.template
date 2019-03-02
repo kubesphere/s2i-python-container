@@ -1,0 +1,79 @@
+{% import "src/common.tpl" as common with context %}
+{% import "src/" + config.os.id + "/macros.tpl" as macros with context %}
+{% if config.os.id == 'rhel' and spec.base_img_version %}
+{%   set img_tag = spec.base_img_version %}
+{% elif spec.img_tag %}
+{%   set img_tag = spec.img_tag %}
+{% endif %}
+# This image provides a Python {{ spec.version }} environment you can use to run your Python
+# applications.
+FROM {{ spec.s2i_base}}{% if img_tag %}:{{ img_tag }}{% endif %}
+
+
+EXPOSE 8080
+
+ENV PYTHON_VERSION={{ spec.version }} \
+    PATH=$HOME/.local/bin/:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    LANG=en_US.UTF-8 \
+    PIP_NO_CACHE_DIR=off
+
+{% if spec.el_version == '8' %}
+# RHEL7 base images atomatically set these envvars to run scl_enable. RHEl8
+# images, however, don't as most images don't need SCLs any more. But we want
+# to run it even on RHEL8, because we set the virtualenv environment as part of
+# that script
+ENV BASH_ENV=${APP_ROOT}/etc/scl_enable \	
+    ENV=${APP_ROOT}/etc/scl_enable \	
+    PROMPT_COMMAND=". ${APP_ROOT}/etc/scl_enable"
+{% endif %}
+
+{{ macros.env_metadata() -}}
+ENV SUMMARY="Platform for building and running Python $PYTHON_VERSION applications" \
+    DESCRIPTION="Python $PYTHON_VERSION available as container is a base platform for \
+building and running various Python $PYTHON_VERSION applications and frameworks. \
+Python is an easy to learn, powerful programming language. It has efficient high-level \
+data structures and a simple but effective approach to object-oriented programming. \
+Python's elegant syntax and dynamic typing, together with its interpreted nature, \
+make it an ideal language for scripting and rapid application development in many areas \
+on most platforms."
+
+LABEL summary="$SUMMARY" \
+      description="$DESCRIPTION" \
+      io.k8s.description="$DESCRIPTION" \
+      io.k8s.display-name="Python {{ spec.version }}" \
+      io.kubesphere.expose-services="8080:http" \
+      io.kubesphere.tags="builder,python,python{{ spec.short_ver }},python-{{ spec.short_ver }},rh-python{{ spec.short_ver }}" \
+{{ macros.labels(spec) }}
+{% set extra_pkgs = spec.extra_pkgs[spec.version] if spec.extra_pkgs and spec.extra_pkgs[spec.version] else [] %}
+RUN INSTALL_PKGS="{{ common.list_pkgs(extra_pkgs + spec.python_pkgs + spec.base_pkgs) -}}
+    {% if spec.preinstall_cmd %}
+{{ common.preinstall_cmd(spec) -}}
+    {% endif %}
+    {{ commands.pkginstaller.install([], {'docs': False}) }}{{ common.enablerepo(spec) }} $INSTALL_PKGS && \
+    rpm -V $INSTALL_PKGS && \
+    {% if spec.logos %}
+    # Remove {{ spec.logos }} (httpd dependency) to keep image size smaller.
+    rpm -e --nodeps {{ spec.logos }} && \
+    {% endif %}
+    {{ commands.pkginstaller.cleancache() }}
+
+# Copy the S2I scripts from the specific language image to $STI_SCRIPTS_PATH.
+COPY ./s2i/bin/ $STI_SCRIPTS_PATH
+
+# Copy extra files to the image.
+COPY ./root/ /
+
+# - Create a Python virtual environment for use by any application to avoid
+#   potential conflicts with Python packages preinstalled in the main Python
+#   installation.
+# - In order to drop the root user, we have to make some directories world
+#   writable as KubeSphere default security model is to run the container
+#   under random UID.
+{{ macros.permissions_setup(spec) }}
+USER 1001
+
+# Set the default CMD to print the usage of the language image.
+CMD $STI_SCRIPTS_PATH/usage
