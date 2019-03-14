@@ -5,7 +5,8 @@ name = "pypi"
 
 [packages]
 "e1839a8" = {path = ".", editable = true}
-requests = "==2.17.0"
+requests = "==2.20.0"
+urllib3 = "==1.23"
 
 [dev-packages]
 pytest = ">=2.8.0"
