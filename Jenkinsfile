@@ -68,6 +68,11 @@ make VERSIONS="3.6" BASE_IMAGE_NAME="python" test'''
           withCredentials([usernamePassword(passwordVariable : 'DOCKER_PASSWORD' ,usernameVariable : 'DOCKER_USERNAME' ,credentialsId : "$DOCKERHUB_CREDENTIAL_ID" ,)]) {
             sh 'echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin'
           }
+          sh '''docker tag kubespheredev/python-27-centos7 kubespheredev/python-27-centos7:2.1
+docker tag kubespheredev/python-34-centos7 kubespheredev/python-34-centos7:2.1
+docker tag kubespheredev/python-35-centos7 kubespheredev/python-35-centos7:2.1
+docker tag kubespheredev/python-36-centos7 kubespheredev/python-36-centos7:2.1 
+'''
           sh 'docker push kubespheredev/python-27-centos7'
           sh 'docker push kubespheredev/python-34-centos7'
           sh 'docker push kubespheredev/python-35-centos7'
