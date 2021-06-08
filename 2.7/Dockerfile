@@ -1,6 +1,6 @@
 # This image provides a Python 2.7 environment you can use to run your Python
 # applications.
-FROM kubespheredev/s2i-base-centos7
+FROM kubespheredev/s2i-base-centos7:v2.1.0
 
 EXPOSE 8080
 
@@ -34,7 +34,7 @@ LABEL summary="$SUMMARY" \
       usage="s2i build https://github.com/kubesphere/s2i-python-container.git --context-dir=2.7/test/setup-test-app/ centos/python-27-centos7 python-sample-app" \
       maintainer="kubesphere.io <kubesphere@yunify.com>"
 
-RUN INSTALL_PKGS="libjpeg-turbo libjpeg-turbo-devel python27 python27-python-devel python27-python-setuptools \
+RUN INSTALL_PKGS="libjpeg-turbo libjpeg-turbo-devel python27 python27-runtime python27-python-devel python27-python-setuptools \
         python27-python-pip nss_wrapper httpd24 httpd24-httpd-devel httpd24-mod_ssl \
         httpd24-mod_auth_kerb httpd24-mod_ldap httpd24-mod_session atlas-devel gcc-gfortran \
         libffi-devel libtool-ltdl enchant" && \

@@ -1,6 +1,6 @@
 # This image provides a Python 3.5 environment you can use to run your Python
 # applications.
-FROM kubespheredev/s2i-base-centos7
+FROM kubespheredev/s2i-base-centos7:v2.1.0
 
 EXPOSE 8080
 
