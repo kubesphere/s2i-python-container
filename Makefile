@@ -1,7 +1,8 @@
 # Variables are documented in common/build.sh.
 BASE_IMAGE_NAME = python
-VERSIONS = 2.7 3.5 3.6 3.7
-KubeSphere_NAMESPACES =
+VERSIONS = 2.7 3.6 3.8 3.9 3.9-minimal 3.10 3.11
+OPENSHIFT_NAMESPACES = 
+DOCKER_BUILD_CONTEXT = ..
 
 # HACK:  Ensure that 'git pull' for old clones doesn't cause confusion.
 # New clones should use '--recursive'.

@@ -9,45 +9,90 @@ function should_collectstatic() {
 }
 
 function virtualenv_bin() {
+  {% if spec.version not in ["2.7", "3.6"] %}
+    # New versions of Python (>3.6) should use venv module
+    # from stdlib instead of virtualenv package
+    python{{ spec.version }} -m venv $1
+  {% else %}
   if head "/etc/redhat-release" | grep -q "^CentOS Linux release 7" || \
      head "/etc/redhat-release" | grep -q "^Red Hat Enterprise Linux\( Server\)\? release 7" || \
-     head "/etc/redhat-release" | grep -q "^Fedora release 29 \(Twenty Nine\)\?"; then
+     head "/etc/redhat-release" | grep -q "^Fedora release"; then
     virtualenv $1
   else
     virtualenv-${PYTHON_VERSION} $1
   fi
+  {% endif %}
 }
 
-# Install pipenv to the separate virtualenv to isolate it
+# Install pipenv or micropipenv to the separate virtualenv to isolate it
 # from system Python packages and packages in the main
 # virtualenv. Executable is simlinked into ~/.local/bin
 # to be accessible. This approach is inspired by pipsi
 # (pip script installer).
-function install_pipenv() {
-  echo "---> Installing pipenv packaging tool ..."
-  {% if spec.version in ["2.7", "3.4", "3.5"] %}
+function install_tool() {
+  echo "---> Installing $1 packaging tool ..."
+  {% if spec.version in ["2.7"] %}
   pip install -U virtualenv
   {% endif %}
-  VENV_DIR=$HOME/.local/venvs/pipenv
+  VENV_DIR=$HOME/.local/venvs/$1
   virtualenv_bin "$VENV_DIR"
-  $VENV_DIR/bin/pip --isolated install -U pipenv
+  # First, try to install the tool without --isolated which means that if you
+  # have your own PyPI mirror, it will take it from there. If this try fails, try it
+  # again with --isolated which ignores external pip settings (env vars, config file)
+  # and installs the tool from PyPI (needs internet connetion).
+  # $1$2 combines package name with [extras] or version specifier if is defined as $2```
+  if ! $VENV_DIR/bin/pip install -U $1$2; then
+    echo "WARNING: Installation of $1 failed, trying again from official PyPI with pip --isolated install"
+    $VENV_DIR/bin/pip install --isolated -U $1$2  # Combines package name with [extras] or version specifier if is defined as $2```
+  fi
   mkdir -p $HOME/.local/bin
-  ln -s $VENV_DIR/bin/pipenv $HOME/.local/bin/pipenv
+  ln -s $VENV_DIR/bin/$1 $HOME/.local/bin/$1
 }
 
 set -e
+
+# First of all, check that we don't have disallowed combination of ENVs
+if [[ ! -z "$ENABLE_PIPENV" && ! -z "$ENABLE_MICROPIPENV" ]]; then
+  echo "ERROR: Pipenv and micropipenv cannot be enabled at the same time!"
+  # podman/buildah does not relay this exit code but it will be fixed hopefuly
+  # https://github.com/containers/buildah/issues/2305
+  exit 3
+fi
 
 shopt -s dotglob
 echo "---> Installing application source ..."
 mv /tmp/src/* "$HOME"
 
-if [[ ! -z "$UPGRADE_PIP_TO_LATEST"{% if spec.version in ["2.7", "3.4", "3.5"] %} || ! -z "$ENABLE_PIPENV"{% endif %} ]]; then
-  echo "---> Upgrading pip to latest version ..."
-  pip install -U pip setuptools wheel
+# set permissions for any installed artifacts
+fix-permissions /opt/app-root -P
+
+{% if spec.version in ["2.7", "3.6"] %}
+# Python <3.7 only code, Python 3.7+ uses bundled wheel from Fedora
+# We have to first upgrade pip to at least 19.3 because:
+# * pip < 9 does not support different packages' versions for Python 2/3
+# * pip < 19.3 does not support manylinux2014 wheels. Only manylinux2014 (and later) wheels
+#   support platforms like ppc64le, aarch64 or armv7
+echo "---> Upgrading pip to latest version supported for Python $PYTHON_VERSION ..."
+if ! pip install -U "pip"; then
+  echo "WARNING: Installation of 'pip' failed, trying again from official PyPI with pip --isolated install"
+  pip install --isolated -U "pip"
+fi
+{% endif %}
+
+if [[ ! -z "$UPGRADE_PIP_TO_LATEST" ]]; then
+  echo "---> Upgrading pip, setuptools and wheel to latest version ..."
+  if ! pip install -U pip setuptools wheel; then
+    echo "WARNING: Installation of the latest pip, setuptools and wheel failed, trying again from official PyPI with pip --isolated install"
+    pip install --isolated -U pip setuptools wheel
+  fi
 fi
 
 if [[ ! -z "$ENABLE_PIPENV" ]]; then
-  install_pipenv
+  if [[ ! -z "$PIN_PIPENV_VERSION" ]]; then
+    # Add == as a prefix to pipenv version, if defined
+    PIN_PIPENV_VERSION="==$PIN_PIPENV_VERSION"
+  fi
+  install_tool "pipenv" "$PIN_PIPENV_VERSION"
   echo "---> Installing dependencies via pipenv ..."
   if [[ -f Pipfile ]]; then
     pipenv install --deploy
@@ -55,12 +100,17 @@ if [[ ! -z "$ENABLE_PIPENV" ]]; then
     pipenv install -r requirements.txt
   fi
   # pipenv check
+elif [[ ! -z "$ENABLE_MICROPIPENV" ]]; then
+  install_tool "micropipenv" "[toml]"
+  echo "---> Installing dependencies via micropipenv ..."
+  # micropipenv detects Pipfile.lock and requirements.txt in this order
+  micropipenv install --deploy
 elif [[ -f requirements.txt ]]; then
   echo "---> Installing dependencies ..."
   pip install -r requirements.txt
 fi
 
-if [[ -f setup.py && -z "$DISABLE_SETUP_PY_PROCESSING" ]]; then
+if [[ ( -f setup.py || -f setup.cfg ) && -z "$DISABLE_SETUP_PY_PROCESSING" ]]; then
   echo "---> Installing application ..."
   pip install .
 fi
@@ -95,4 +145,4 @@ if should_collectstatic; then
 fi
 
 # set permissions for any installed artifacts
-fix-permissions /opt/app-root
+fix-permissions /opt/app-root -P

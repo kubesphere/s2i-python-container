@@ -17,7 +17,13 @@ function should_migrate() {
 
 # Guess the number of workers according to the number of cores
 function get_default_web_concurrency() {
+  {% if spec.minimal %}
+  # Using python and just python here because the script has
+  # platform-python in its shebang which we don't have in the minimal image
+  limit_vars=$(python /usr/bin/cgroup-limits)
+  {% else %}
   limit_vars=$(cgroup-limits)
+  {% endif %}
   local $limit_vars
   if [ -z "${NUMBER_OF_CORES:-}" ]; then
     echo 1
@@ -35,30 +41,49 @@ function get_default_web_concurrency() {
   echo $default
 }
 
+function maybe_run_in_init_wrapper() {
+  if [[ -z "$ENABLE_INIT_WRAPPER" ]]; then
+    exec "$@"
+  else
+    exec $STI_SCRIPTS_PATH/init-wrapper "$@"
+  fi
+}
+
 APP_HOME=$(readlink -f "${APP_HOME:-.}")
 # Change the working directory to APP_HOME
 PYTHONPATH="$(pwd)${PYTHONPATH:+:$PYTHONPATH}"
 cd "$APP_HOME"
 
-app_script_check="${APP_SCRIPT-}"
-APP_SCRIPT="${APP_SCRIPT-app.sh}"
-if [[ -f "$APP_SCRIPT" ]]; then
-  echo "---> Running application from script ($APP_SCRIPT) ..."
-  if [[ "$APP_SCRIPT" != /* ]]; then
-    APP_SCRIPT="./$APP_SCRIPT"
-  fi
-  exec "$APP_SCRIPT"
-else
-  test -n "$app_script_check" && (>&2 echo "ERROR: file '$app_script_check' not found.") && exit 1
+if [ -z "$APP_SCRIPT" ] && [ -z "$APP_FILE" ] && [ -z "$APP_MODULE" ]; then
+  # Set default values for APP_SCRIPT and APP_FILE only when all three APP_
+  # variables are not defined by user. This prevents a situation when
+  # APP_MODULE is defined to app:application but the app.py file is found as the
+  # APP_FILE and then executed by Python instead of gunicorn.
+  APP_SCRIPT="app.sh"
+  APP_SCRIPT_DEFAULT=1
+  APP_FILE="app.py"
+  APP_FILE_DEFAULT=1
 fi
 
-app_file_check="${APP_FILE-}"
-APP_FILE="${APP_FILE-app.py}"
-if [[ -f "$APP_FILE" ]]; then
-  echo "---> Running application from Python script ($APP_FILE) ..."
-  exec python "$APP_FILE"
-else
-  test -n "$app_file_check" && (>&2 echo "ERROR: file '$app_file_check' not found.") && exit 1
+if [ ! -z "$APP_SCRIPT" ]; then
+  if [[ -f "$APP_SCRIPT" ]]; then
+    echo "---> Running application from script ($APP_SCRIPT) ..."
+    if [[ "$APP_SCRIPT" != /* ]]; then
+      APP_SCRIPT="./$APP_SCRIPT"
+    fi
+    maybe_run_in_init_wrapper "$APP_SCRIPT"
+  elif [[ -z "$APP_SCRIPT_DEFAULT" ]]; then
+    echo "ERROR: file '$APP_SCRIPT' not found." && exit 1
+  fi
+fi
+
+if [ ! -z "$APP_FILE" ]; then
+  if [[ -f "$APP_FILE" ]]; then
+    echo "---> Running application from Python script ($APP_FILE) ..."
+    maybe_run_in_init_wrapper python "$APP_FILE"
+  elif [[ -z "$APP_FILE_DEFAULT" ]]; then
+    echo "ERROR: file '$APP_FILE' not found." && exit 1
+  fi
 fi
 
 # Look for 'manage.py' in the current directory
@@ -74,6 +99,11 @@ if should_migrate; then
   fi
 fi
 
+# If not set, use 8080 as the default port
+if [ -z "$PORT" ]; then
+  PORT=8080
+fi
+
 if is_gunicorn_installed; then
   setup_py=$(find "$HOME" -maxdepth 2 -type f -name 'setup.py' -print -quit)
   # Look for wsgi module in the current directory
@@ -86,17 +116,27 @@ if is_gunicorn_installed; then
   if [[ "$APP_MODULE" ]]; then
     export WEB_CONCURRENCY=${WEB_CONCURRENCY:-$(get_default_web_concurrency)}
 
-    echo "---> Serving application with gunicorn ($APP_MODULE) ..."
-    exec gunicorn "$APP_MODULE" --bind=0.0.0.0:8080 --access-logfile=- --config "$APP_CONFIG"
+    # Default settings for gunicorn if none of the custom are set
+    if [ -z "$APP_CONFIG" ] && [ -z "$GUNICORN_CMD_ARGS" ]; then
+      GUNICORN_CMD_ARGS="--bind=0.0.0.0:$PORT --access-logfile=-"
+      gunicorn_settings_source="default"
+    else
+      gunicorn_settings_source="custom"
+    fi
+
+    # Gunicorn can read GUNICORN_CMD_ARGS as an env variable but because this is not
+    # supported in Gunicorn < 20 we still need for Python 2, we are using arguments directly.
+    echo "---> Serving application with gunicorn ($APP_MODULE) with $gunicorn_settings_source settings ..."
+    exec gunicorn "$APP_MODULE" $GUNICORN_CMD_ARGS --config "$APP_CONFIG"
   fi
 fi
 
 if is_django_installed; then
   if [[ -f "$manage_file" ]]; then
-    echo "---> Serving application with 'manage.py runserver' ..."
+    echo "---> Serving application with 'manage.py runserver 0.0.0.0:$PORT' ..."
     echo "WARNING: this is NOT a recommended way to run you application in production!"
     echo "Consider using gunicorn or some other production web server."
-    exec python "$manage_file" runserver 0.0.0.0:8080
+    maybe_run_in_init_wrapper python "$manage_file" runserver 0.0.0.0:$PORT
   else
     echo "WARNING: seems that you're using Django, but we could not find a 'manage.py' file."
     echo "Skipped 'python manage.py runserver'."
